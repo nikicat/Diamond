@@ -14,13 +14,9 @@ swap  - # of bytes of swap usage
 """
 
 import diamond.collector
+import diamond.convertor
 import os
-
-_KEY_MAPPING = [
-    'cache',
-    'rss',
-    'swap'
-]
+import collections
 
 
 class MemoryCgroupCollector(diamond.collector.Collector):
@@ -41,45 +37,40 @@ class MemoryCgroupCollector(diamond.collector.Collector):
         config.update({
             'path':     'memory_cgroup',
             'method':   'Threaded',
+            'enabled_keys': 'cache,rss,swap',
         })
         return config
 
     def collect(self):
-        # find all memory.stat files
-        matches = []
+        results = collections.defaultdict(dict)
+        enabled_keys = self.config['enabled_keys'].split(',')
         for root, dirnames, filenames in os.walk(self.MEMORY_PATH):
             for filename in filenames:
+                parent = root.replace(self.MEMORY_PATH, "").replace("/", ".")
+                if parent == '':
+                    parent = 'system'
+                filepath = os.path.join(root, filename)
                 if filename == 'memory.stat':
-                    # matches will contain a tuple contain path to cpuacct.stat
+                    # matches will contain a tuple with lines from stat
                     # and the parent of the stat
-                    parent = root.replace(self.MEMORY_PATH,
-                                          "").replace("/", ".")
-                    if parent == '':
-                        parent = 'system'
-                    matches.append((parent, os.path.join(root, filename)))
+                    with open(filepath) as stat_file:
+                        for line in stat_file:
+                            name, value = line.split()
+                            if name not in enabled_keys:
+                                continue
+                            results[parent][name] = value
+                elif filename == 'memory.limit_in_bytes':
+                    with open(filepath) as limits_file:
+                        results[parent]['limit'] = limits_file.readline()
 
-        # Read metrics from cpuacct files
-        results = {}
-        for match in matches:
-            results[match[0]] = {}
-            stat_file = open(match[1])
-            elements = [line.split() for line in stat_file]
-            stat_file.close()
-
-            for el in elements:
-                name, value = el
-                if name not in _KEY_MAPPING:
-                    continue
+        print(self.config['byte_unit'])
+        for parent, stats in results.items():
+            for key, value in stats.items():
                 for unit in self.config['byte_unit']:
-                    value = diamond.convertor.binary.convert(
-                        value=value, oldUnit='B', newUnit=unit)
-                    results[match[0]][name] = value
-                    # TODO: We only support one unit node here. Fix it!
-                    break
-
-        # create metrics from collected utimes and stimes for cgroups
-        for parent, cpuacct in results.iteritems():
-            for key, value in cpuacct.iteritems():
-                metric_name = '.'.join([parent, key])
-                self.publish(metric_name, value, metric_type='GAUGE')
+                    newvalue = diamond.convertor.binary.convert(
+                            value=value, oldUnit='byte', newUnit=unit)
+                    newkey = key if unit == 'byte' else '_'.join([unit,key])
+                    metric_name = '.'.join([parent, newkey])
+                    print('publishing {}={}'.format(metric_name, newvalue))
+                    self.publish(metric_name, newvalue, metric_type='GAUGE')
         return True
