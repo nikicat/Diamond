@@ -7,6 +7,7 @@ from test import get_collector_config
 from test import unittest
 from mock import Mock
 from mock import patch
+from mock import mock_open
 
 try:
     from cStringIO import StringIO
@@ -35,7 +36,7 @@ class TestMemoryDockerCollector(CollectorTestCase):
     def setUp(self):
         config = get_collector_config('MemoryDockerCollector', {
             'interval': 10,
-            'byte_unit': 'megabyte'
+            'byte_unit': ['megabyte', 'byte']
         })
 
         self.collector = MemoryDockerCollector(config, None)
@@ -43,28 +44,29 @@ class TestMemoryDockerCollector(CollectorTestCase):
     def test_import(self):
         self.assertTrue(MemoryDockerCollector)
 
-    @patch('__builtin__.open')
     @patch('os.walk', Mock(return_value=iter(fixtures)))
+    @patch.object(docker.Client, '__init__', Mock(return_value=None))
     @patch.object(docker.Client, 'containers', Mock(return_value=[]))
     @patch.object(Collector, 'publish')
-    def test_should_open_all_cpuacct_stat(self, publish_mock, open_mock):
-        open_mock.side_effect = lambda x: StringIO('')
-        self.collector.collect()
-        open_mock.assert_any_call(
-            fixtures_path + 'lxc/testcontainer/memory.stat')
-        open_mock.assert_any_call(fixtures_path + 'lxc/memory.stat')
-        open_mock.assert_any_call(fixtures_path + 'memory.stat')
+    def test_should_open_all_stat(self, publish_mock):
+        open_mock = mock_open()
+        with patch('__builtin__.open', open_mock):
+            self.collector.collect()
+            for filename in ('memory.stat', 'memory.limit_in_bytes'):
+                open_mock.assert_any_call(
+                    fixtures_path + 'lxc/testcontainer/' + filename)
+                open_mock.assert_any_call(fixtures_path + 'lxc/' + filename)
+                open_mock.assert_any_call(fixtures_path + filename)
 
-    @patch('__builtin__.open')
+    @patch('__builtin__.open', mock_open())
     @patch('os.walk', Mock(return_value=iter(fixtures)))
+    @patch.object(docker.Client, '__init__', Mock(return_value=None))
     @patch.object(docker.Client, 'containers')
     @patch.object(Collector, 'publish')
-    def test_should_get_containers(self, publish_mock, containers_mock,
-                                   open_mock):
+    def test_should_get_containers(self, publish_mock, containers_mock):
         containers_mock.return_value = []
-        open_mock.side_effect = lambda x: StringIO('')
         self.collector.collect()
-        containers_mock.assert_any_call(all=True)
+        containers_mock.assert_called_once_with(all=True)
 
     @patch.object(Collector, 'publish')
     @patch.object(docker.Client, 'containers',
@@ -74,21 +76,46 @@ class TestMemoryDockerCollector(CollectorTestCase):
         self.collector.collect()
 
         self.assertPublishedMany(publish_mock, {
-            'lxc.testcontainer.cache': 1,
-            'lxc.testcontainer.rss': 1,
-            'lxc.testcontainer.swap': 1,
-            'lxc.cache': 1,
-            'lxc.rss': 1,
-            'lxc.swap': 1,
-            'system.cache': 1,
-            'system.rss': 1,
-            'system.swap': 1,
-            'docker.testcontainer.cache': 1,
-            'docker.testcontainer.rss': 1,
-            'docker.testcontainer.swap': 1,
-            'docker.cache': 1,
-            'docker.rss': 1,
-            'docker.swap': 1,
+            'lxc.testcontainer.megabyte_cache': 1,
+            'lxc.testcontainer.megabyte_rss': 1,
+            'lxc.testcontainer.megabyte_swap': 1,
+            'lxc.testcontainer.megabyte_limit': 1,
+            'lxc.megabyte_cache': 1,
+            'lxc.megabyte_rss': 1,
+            'lxc.megabyte_swap': 1,
+            'lxc.megabyte_limit': 1,
+            'system.megabyte_cache': 1,
+            'system.megabyte_rss': 1,
+            'system.megabyte_swap': 1,
+            'system.megabyte_limit': 1,
+            'docker.testcontainer.megabyte_cache': 1,
+            'docker.testcontainer.megabyte_rss': 1,
+            'docker.testcontainer.megabyte_swap': 1,
+            'docker.testcontainer.megabyte_limit': 1,
+            'docker.megabyte_cache': 1,
+            'docker.megabyte_rss': 1,
+            'docker.megabyte_swap': 1,
+            'docker.megabyte_limit': 1,
+            'lxc.testcontainer.cache': 2**20,
+            'lxc.testcontainer.rss': 2**20,
+            'lxc.testcontainer.swap': 2**20,
+            'lxc.testcontainer.limit': 2**20,
+            'lxc.cache': 2**20,
+            'lxc.rss': 2**20,
+            'lxc.swap': 2**20,
+            'lxc.limit': 2**20,
+            'system.cache': 2**20,
+            'system.rss': 2**20,
+            'system.swap': 2**20,
+            'system.limit': 2**20,
+            'docker.testcontainer.cache': 2**20,
+            'docker.testcontainer.rss': 2**20,
+            'docker.testcontainer.swap': 2**20,
+            'docker.testcontainer.limit': 2**20,
+            'docker.cache': 2**20,
+            'docker.rss': 2**20,
+            'docker.swap': 2**20,
+            'docker.limit': 2**20,
         })
 
 if __name__ == "__main__":
